@@ -14,10 +14,11 @@
 
 #define project "HomeSprinkler"
 
-#define SENSORPERIOD 0
-#define SENSORVALUE  500   //dry soil
+#define PUMP_PIN D5          /* вывод с ШИМ  */       //  объявляем константу с указанием номера вывода, к которому подключен силовой ключ
+#define TIME_WAITING 60                               //  объявляем константу для хранения времени ожидания после полива               (в секундах)     от 0 до 99
 
-#define PUMP_PIN D5
+
+enum modState_t { MODE_OFF, MODE_IDLE, MODE_ACTIVE, MODE_SPRINKLING };
 
 /* Comment this out to disable prints and save space */
 #define BLYNK_PRINT Serial
@@ -36,14 +37,15 @@ Adafruit_SSD1306 display(OLED_RESET);
 
 ulong loop_timer = 0;                 // 0.1 sec loop timer
 byte loop_count = 0;                  // loop counter
-int16_t sensor_count = 0;             // sensor counter
 
 int pump = LOW;
-int16_t humidity = 0;
-int16_t minimal = 50;
 uint16_t arrMoisture[10];                             //  объявляем массив для хранения 10 последних значений влажности почвы
 uint32_t valMoisture;                                 //  объявляем переменную для расчёта среднего значения влажности почвы
+uint32_t timWatering;                                 //  объявляем переменную для хранения времени начала последнего полива           (в миллисекундах)
+uint32_t timSketch;                                   //  объявляем переменную для хранения времени прошедшего с момента старта скетча (в миллисекундах)
+uint16_t timDuration = 5;    /* по умолчанию */       //  объявляем переменную для хранения длительности полива                        (в секундах)     от 0 до 99
 uint16_t limMoisture = 0;    /* по умолчанию */       //  объявляем переменную для хранения пороговой влажности почвы                  (для вкл насоса) от 0 до 999
+uint8_t  modState = 0;       /* при старте   */       //  объявляем переменную для хранения состояния устройства: 0-не активно, 1-ожидание, 2-активно, 3-полив, 4-установка пороговой влажности, 5-установка времени полива
 
 void setup()
 {
@@ -51,9 +53,11 @@ void setup()
 	Serial.begin(115200);
 	delay(10);
 
-	pinMode(PUMP_PIN, OUTPUT);
+	pinMode(PUMP_PIN, OUTPUT);                        //  переводим вывод PUMP_PIN в режим выхода
+	digitalWrite(PUMP_PIN, LOW);                      //  выключаем насос
+	timWatering = 0;                                  //  сбрасываем время начала последнего полива
 
-	// by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+													  // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48)
 												// init done
 
@@ -125,49 +129,33 @@ void setup()
 	ArduinoOTA.begin();
 }
 
-uint16_t getAdc0()
-{
-	uint16_t alr = 0;
-	for (byte i = 0; i < 32; i++) {
-		alr += analogRead(A0);
-		delay(1);
-	}
-	return alr >> 5;
-}
-
 void set_pump(int state)
 {
-	pump = state ? HIGH : LOW;
-	digitalWrite(PUMP_PIN, pump);
-	Blynk.virtualWrite(0, pump);
+	int npump = state ? HIGH : LOW;
+	if (pump != npump) {
+		pump = npump;
+		digitalWrite(PUMP_PIN, pump);
+		Blynk.virtualWrite(0, pump);
+	}
 }
 
 void every_second()
 {
-	sensor_count--;
-	if (sensor_count <= 0) {
-		uint16_t val = getAdc0();
+	uint16_t val = analogRead(A0);
 
-		valMoisture = 0;
-		for (int i = 0; i<9; i++) 
-		{
-			arrMoisture[i] = arrMoisture[i + 1]; 
-		}
-		arrMoisture[9] = val;
-		for (int i = 0; i<10; i++) 
-		{
-			valMoisture += arrMoisture[i]; 
-		}
-		valMoisture /= 10; // вычисляем среднее значение влажности почвы
-
-		Serial.print("A0: ");
-		Serial.println(val);
-		humidity = map(valMoisture, 0, 1023, 0, 100);
-
-		Blynk.virtualWrite(1, humidity);
-
-		sensor_count = SENSORPERIOD;
+	valMoisture = 0;
+	for (int i = 0; i < 9; i++)
+	{
+		arrMoisture[i] = arrMoisture[i + 1];
 	}
+	arrMoisture[9] = val;
+	for (int i = 0; i < 10; i++)
+	{
+		valMoisture += arrMoisture[i];
+	}
+	valMoisture /= 10; // вычисляем среднее значение влажности почвы
+
+	Blynk.virtualWrite(1, valMoisture);
 
 	// Clear the buffer.
 	display.clearDisplay();
@@ -175,50 +163,54 @@ void every_second()
 	display.setTextColor(WHITE);
 	display.setCursor(0, 0);
 
-	display.println("Humidity");
-	display.print(humidity);
-	display.println(" %");
-	display.println("Minimal");
-	display.print(minimal);
-	display.println(" %");
-	display.println("Pump is ");
+	display.print("Cur: ");
+	display.println(valMoisture);
+	display.print("Lim: ");
+	display.println(limMoisture);
+	display.println("Mode:");
 	display.setTextColor(BLACK, WHITE);
-	display.println(pump ? "ON" : "OFF");
+	switch (modState)
+	{
+	case MODE_OFF:
+		display.println("OFF");
+		break;
+	case MODE_IDLE:
+		display.println("IDLE");
+		break;
+	case MODE_ACTIVE:
+		display.println("ACTIVE");
+		break;
+	case MODE_SPRINKLING:
+		display.println("SPRINKLING");
+		break;
+	default:
+		break;
+	}
 	display.display();
 }
 
 void loop()
 {
-	if (millis() > loop_timer) 
+	timSketch = millis();                             //  читаем текущее время с момента старта скетча
+	if (timWatering > timSketch) {
+		timWatering = 0;                              //  обнуляем время начала последнего полива, если произошло переполнение millis()
+	}
+
+	if (millis() > loop_timer)
 	{
 		// every 0.1 second
 		loop_timer = millis() + 100;
 		loop_count++;
 
-		if (loop_count == 10) 
+		if (loop_count == 10)
 		{
 			// every second
 			loop_count = 0;
 			every_second();
 		}
-
-		if (humidity < minimal)
-		{
-			if (!pump)
-			{
-				set_pump(HIGH);
-			}
-		}
-		else
-		{
-			if (pump)
-			{
-				set_pump(LOW);
-			}
-		}
 	}
 
-	if (WiFi.status() == WL_CONNECTED) 
+	if (WiFi.status() == WL_CONNECTED)
 	{
 		//ota loop
 		ArduinoOTA.handle();
@@ -226,27 +218,34 @@ void loop()
 		Blynk.run();
 	}
 
-	// if we get a valid byte, read analog ins:
-	if (Serial.available() > 0) 
-	{
-		int n = Serial.read();
-		if (n == '?') 
-		{
-			// выводим температуру (t) и влажность (h) на монитор порта
-			Serial.print("Humidity: ");
-			Serial.print(humidity);
-			Serial.println(" %");
-			Serial.print("Pump is ");
-			Serial.println(pump ? "ON" : "OFF");
+	//*******Управление устройством:*******
+	switch (modState) {
+	case MODE_OFF:                                    //  Устройство не активно
+		if (timDuration && limMoisture) {             //  если заданы длительность полива и пороговая влажность
+			modState = MODE_ACTIVE;
 		}
-		else if (n == '1') 
-		{
-			set_pump(HIGH);
+		break;
+	case MODE_IDLE:                                   //  Устройство в режиме ожидания (после полива)
+		if (timDuration + TIME_WAITING - ((timSketch - timWatering) / 1000) <= 0) {
+			modState = MODE_ACTIVE;                   //  если закончилось время ожидания
 		}
-		else if (n == '0') 
-		{
-			set_pump(LOW);
+		break;
+	case MODE_ACTIVE:                                 //  Устройство активно
+		if (!timDuration || !limMoisture) {           //  если не заданы длительность полива или пороговая влажность
+			modState = MODE_OFF;
 		}
+		else if (valMoisture <= limMoisture) {        //  если текущая влажность почвы меньше пороговой
+			timWatering = timSketch;
+			modState = MODE_SPRINKLING;
+			analogWrite(PUMP_PIN, 1023);
+		}
+		break;
+	case MODE_SPRINKLING:                             //  Устройство в режиме полива
+		if (timDuration - ((timSketch - timWatering) / 1000) <= 0) {
+			modState = MODE_IDLE;                     //  если закончилось время полива
+			analogWrite(PUMP_PIN, 0);
+		}
+		break;
 	}
 
 	//  yield();     // yield == delay(0), delay contains yield, auto yield in loop
@@ -260,8 +259,9 @@ BLYNK_CONNECTED() {
 
 	// Alternatively, you could override server state using:
 	Blynk.virtualWrite(0, pump);
-	Blynk.virtualWrite(1, humidity);
-	Blynk.virtualWrite(2, minimal);
+	Blynk.virtualWrite(1, valMoisture);
+	Blynk.virtualWrite(2, timDuration);
+	Blynk.virtualWrite(3, limMoisture);
 }
 
 BLYNK_READ(0)
@@ -276,14 +276,35 @@ BLYNK_WRITE(0) {
 
 BLYNK_READ(1)
 {
-	Blynk.virtualWrite(1, humidity);
+	Blynk.virtualWrite(1, valMoisture);
 }
 
 BLYNK_READ(2)
 {
-	Blynk.virtualWrite(2, minimal);
+	Blynk.virtualWrite(2, timDuration);
 }
 
 BLYNK_WRITE(2) {
-	minimal = param.asInt();
+	timDuration = param.asInt();
+	if (timDuration < 0) {
+		timDuration = 0;
+	}
+	else if (timDuration > 99) {
+		timDuration = 99;
+	}
+}
+
+BLYNK_READ(3)
+{
+	Blynk.virtualWrite(3, limMoisture);
+}
+
+BLYNK_WRITE(3) {
+	limMoisture = param.asInt();
+	if (limMoisture < 0) {
+		limMoisture = 0;
+	}
+	else if (limMoisture > 999) {
+		limMoisture = 999;
+	}
 }
