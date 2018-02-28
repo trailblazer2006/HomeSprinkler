@@ -16,12 +16,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="HomeSprinkler.ino" />
+    <None Include="RtcTime.ino" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="__vm\.HomeSprinkler.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Adafruit_SSD1306.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RtcTime.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

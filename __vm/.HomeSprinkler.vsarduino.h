@@ -109,5 +109,6 @@ typedef long __PTRDIFF_TYPE__;
 #define noInterrupts() cli()
 
 #include "HomeSprinkler.ino"
+#include "RtcTime.ino"
 #endif
 #endif

@@ -1,7 +1,7 @@
-﻿#include "Adafruit_SSD1306.h"
-#include <SPI.h>
+﻿#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
+#include "Adafruit_SSD1306.h"
 
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 
@@ -11,14 +11,14 @@
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
 
 #include <BlynkSimpleEsp8266.h>
+#include <Ticker.h>
+
+#include <ESP8266mDNS.h>               // ArduinoOTA
+#include <ArduinoOTA.h>
+
+#include "RtcTime.h"
 
 #define project "HomeSprinkler"
-
-#define PUMP_PIN D5          /* вывод с ШИМ  */       //  объявляем константу с указанием номера вывода, к которому подключен силовой ключ
-#define TIME_WAITING 60                               //  объявляем константу для хранения времени ожидания после полива               (в секундах)     от 0 до 99
-
-
-enum modState_t { MODE_OFF, MODE_IDLE, MODE_ACTIVE, MODE_SPRINKLING };
 
 /* Comment this out to disable prints and save space */
 #define BLYNK_PRINT Serial
@@ -27,21 +27,25 @@ enum modState_t { MODE_OFF, MODE_IDLE, MODE_ACTIVE, MODE_SPRINKLING };
 // Go to the Project Settings (nut icon).
 const char blynk_auth[] = "3f2069fd89fb45e39f754b284a4ee42a";
 
-#include <ESP8266mDNS.h>               // ArduinoOTA
-#include <ArduinoOTA.h>
+WidgetLCD lcd(V1);
 
-// SCL GPIO5
-// SDA GPIO4
-#define OLED_RESET 0  // GPIO0
+//  SCL GPIO5
+//  SDA GPIO4
+#define OLED_RESET 0                                  //  GPIO0
 Adafruit_SSD1306 display(OLED_RESET);
 
-ulong loop_timer = 0;                 // 0.1 sec loop timer
-byte loop_count = 0;                  // loop counter
+ulong loop_timer = 0;                                 // 0.1 sec loop timer
+byte loop_count = 0;                                  // loop counter
+TIME_T RtcTime;
+uint32_t uptime = 0;                                  //  Counting every second until 4294967295 = 130 year
 
-int pump = LOW;
+enum modState_t { MODE_OFF, MODE_IDLE, MODE_ACTIVE, MODE_SPRINKLING };
+
+#define PUMP_PIN D5          /* вывод с ШИМ  */       //  объявляем константу с указанием номера вывода, к которому подключен силовой ключ
+#define TIME_WAITING 60                               //  объявляем константу для хранения времени ожидания после полива               (в секундах)     от 0 до 99
 uint16_t arrMoisture[10];                             //  объявляем массив для хранения 10 последних значений влажности почвы
 uint32_t valMoisture;                                 //  объявляем переменную для расчёта среднего значения влажности почвы
-uint32_t timWatering;                                 //  объявляем переменную для хранения времени начала последнего полива           (в миллисекундах)
+uint32_t timSprinkling;                               //  объявляем переменную для хранения времени начала последнего полива           (в миллисекундах)
 uint32_t timSketch;                                   //  объявляем переменную для хранения времени прошедшего с момента старта скетча (в миллисекундах)
 uint16_t timDuration = 5;    /* по умолчанию */       //  объявляем переменную для хранения длительности полива                        (в секундах)     от 0 до 99
 uint16_t limMoisture = 0;    /* по умолчанию */       //  объявляем переменную для хранения пороговой влажности почвы                  (для вкл насоса) от 0 до 999
@@ -55,9 +59,9 @@ void setup()
 
 	pinMode(PUMP_PIN, OUTPUT);                        //  переводим вывод PUMP_PIN в режим выхода
 	digitalWrite(PUMP_PIN, LOW);                      //  выключаем насос
-	timWatering = 0;                                  //  сбрасываем время начала последнего полива
+	timSprinkling = 0;                                //  сбрасываем время начала последнего полива
 
-													  // by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
+												// by default, we'll generate the high voltage from the 3.3v line internally! (neat!)
 	display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48)
 												// init done
 
@@ -127,73 +131,98 @@ void setup()
 	});
 	ArduinoOTA.setHostname(project);
 	ArduinoOTA.begin();
+
+	RtcInit();
+
+	lcd.clear(); //Use it to clear the LCD Widget
 }
 
-void set_pump(int state)
+uint16_t getAdc0()
 {
-	int npump = state ? HIGH : LOW;
-	if (pump != npump) {
-		pump = npump;
-		digitalWrite(PUMP_PIN, pump);
-		Blynk.virtualWrite(0, pump);
+	uint16_t alr = 0;
+	for (byte i = 0; i < 32; i++) {
+		alr += analogRead(A0);
+		delay(1);
 	}
+	return alr >> 5;
 }
 
 void every_second()
 {
-	uint16_t val = analogRead(A0);
+	char str[16];
+	char dt[21];
+	TIME_T tmpTime;
+
+	uptime++;
 
 	valMoisture = 0;
 	for (int i = 0; i < 9; i++)
 	{
 		arrMoisture[i] = arrMoisture[i + 1];
 	}
-	arrMoisture[9] = val;
+	arrMoisture[9] = getAdc0();
 	for (int i = 0; i < 10; i++)
 	{
 		valMoisture += arrMoisture[i];
 	}
 	valMoisture /= 10; // вычисляем среднее значение влажности почвы
 
-	Blynk.virtualWrite(1, valMoisture);
-
 	// Clear the buffer.
 	display.clearDisplay();
 	display.setTextSize(1);
-	display.setTextColor(WHITE);
 	display.setCursor(0, 0);
 
-	display.print("Cur: ");
-	display.println(valMoisture);
-	display.print("Lim: ");
-	display.println(limMoisture);
-	display.println("Mode:");
 	display.setTextColor(BLACK, WHITE);
 	switch (modState)
 	{
 	case MODE_OFF:
-		display.println("OFF");
+		lcd.print(0, 0, "      OFF       ");
+		display.println("   OFF    ");
 		break;
 	case MODE_IDLE:
-		display.println("IDLE");
+		lcd.print(0, 0, "      IDLE      ");
+		display.println("   IDLE   ");
 		break;
 	case MODE_ACTIVE:
-		display.println("ACTIVE");
+		lcd.print(0, 0, "     ACTIVE     ");
+		display.println("  ACTIVE  ");
 		break;
 	case MODE_SPRINKLING:
+		lcd.print(0, 0, "   SPRINKLING   ");
 		display.println("SPRINKLING");
 		break;
 	default:
 		break;
 	}
+
+	snprintf_P(str, sizeof(str), PSTR("Moisture: %d     "), valMoisture);
+	lcd.print(0, 1, str);
+
+	BreakTime(uptime, tmpTime);
+	// "P128DT14H35M44S" - ISO8601:2004 - https://en.wikipedia.org/wiki/ISO_8601 Durations
+	// snprintf_P(dt, sizeof(dt), PSTR("P%dDT%02dH%02dM%02dS"), ut.days, ut.hour, ut.minute, ut.second);
+	// "128 14:35:44" - OpenVMS
+	// "128T14:35:44" - Tasmota
+	snprintf_P(dt, sizeof(dt), PSTR("%dT%02d:%02d:%02d"), tmpTime.days, tmpTime.hour, tmpTime.minute, tmpTime.second);
+
+	display.setTextColor(WHITE, BLACK);
+	display.print("Moist: ");
+	display.println(valMoisture);
+	display.print("Durat: ");
+	display.println(timDuration);
+	display.print("Limit: ");
+	display.println(limMoisture);
+	display.println("Uptime:");
+	display.println(dt);
+
 	display.display();
 }
 
 void loop()
 {
 	timSketch = millis();                             //  читаем текущее время с момента старта скетча
-	if (timWatering > timSketch) {
-		timWatering = 0;                              //  обнуляем время начала последнего полива, если произошло переполнение millis()
+	if (timSprinkling > timSketch) {
+		timSprinkling = 0;                            //  обнуляем время начала последнего полива, если произошло переполнение millis()
 	}
 
 	if (millis() > loop_timer)
@@ -223,27 +252,32 @@ void loop()
 	case MODE_OFF:                                    //  Устройство не активно
 		if (timDuration && limMoisture) {             //  если заданы длительность полива и пороговая влажность
 			modState = MODE_ACTIVE;
+			uptime = 0;
 		}
 		break;
 	case MODE_IDLE:                                   //  Устройство в режиме ожидания (после полива)
-		if (timDuration + TIME_WAITING - ((timSketch - timWatering) / 1000) <= 0) {
+		if (timDuration + TIME_WAITING - ((timSketch - timSprinkling) / 1000) <= 0) {
 			modState = MODE_ACTIVE;                   //  если закончилось время ожидания
+			uptime = 0;
 		}
 		break;
 	case MODE_ACTIVE:                                 //  Устройство активно
 		if (!timDuration || !limMoisture) {           //  если не заданы длительность полива или пороговая влажность
 			modState = MODE_OFF;
+			uptime = 0;
 		}
 		else if (valMoisture <= limMoisture) {        //  если текущая влажность почвы меньше пороговой
-			timWatering = timSketch;
+			timSprinkling = timSketch;
 			modState = MODE_SPRINKLING;
 			analogWrite(PUMP_PIN, 1023);
+			uptime = 0;
 		}
 		break;
 	case MODE_SPRINKLING:                             //  Устройство в режиме полива
-		if (timDuration - ((timSketch - timWatering) / 1000) <= 0) {
+		if (timDuration - ((timSketch - timSprinkling) / 1000) <= 0) {
 			modState = MODE_IDLE;                     //  если закончилось время полива
 			analogWrite(PUMP_PIN, 0);
+			uptime = 0;
 		}
 		break;
 	}
@@ -258,25 +292,8 @@ BLYNK_CONNECTED() {
 	//Blynk.syncVirtual(V2);
 
 	// Alternatively, you could override server state using:
-	Blynk.virtualWrite(0, pump);
-	Blynk.virtualWrite(1, valMoisture);
 	Blynk.virtualWrite(2, timDuration);
 	Blynk.virtualWrite(3, limMoisture);
-}
-
-BLYNK_READ(0)
-{
-	Blynk.virtualWrite(0, pump);
-}
-
-BLYNK_WRITE(0) {
-	int par = param.asInt();
-	set_pump(par);
-}
-
-BLYNK_READ(1)
-{
-	Blynk.virtualWrite(1, valMoisture);
 }
 
 BLYNK_READ(2)
