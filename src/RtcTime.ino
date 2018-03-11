@@ -119,8 +119,7 @@ String GetUptime()
 
 	// "128 14:35:44" - OpenVMS
 	// "128T14:35:44" - Tasmota
-	snprintf_P(dt, sizeof(dt), PSTR("%dT%02d:%02d:%02d"),
-		ut.days, ut.hour, ut.minute, ut.second);
+	snprintf_P(dt, sizeof(dt), PSTR("%dT%02d:%02d:%02d"), ut.days, ut.hour, ut.minute, ut.second);
 	return String(dt);
 }
 
@@ -307,7 +306,7 @@ void RtcSecond()
 	utc_time++;
 	local_time = utc_time;
 	if (local_time > 1451602800) {  // 2016-01-01
-		if (99 == APP_TIMEZONE) {
+		if (99 == WifiSettings.timezone) {
 			if (DaylightSavingTime.hemis) {
 				dstoffset = StandardTime.offset * SECS_PER_MIN;  // Southern hemisphere
 				stdoffset = DaylightSavingTime.offset * SECS_PER_MIN;
@@ -324,7 +323,7 @@ void RtcSecond()
 			}
 		}
 		else {
-			local_time += APP_TIMEZONE * SECS_PER_HOUR;
+			local_time += WifiSettings.timezone * SECS_PER_HOUR;
 		}
 	}
 	BreakTime(local_time, RtcTime);
@@ -337,9 +336,9 @@ void RtcSecond()
 
 void RtcInit()
 {
-	sntp_setservername(0, NTP_SERVER1);
-	sntp_setservername(1, NTP_SERVER2);
-	sntp_setservername(2, NTP_SERVER3);
+	sntp_setservername(0, WifiSettings.ntp_server[0]);
+	sntp_setservername(1, WifiSettings.ntp_server[1]);
+	sntp_setservername(2, WifiSettings.ntp_server[2]);
 	sntp_stop();
 	sntp_set_timezone(0);      // UTC time
 	sntp_init();

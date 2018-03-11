@@ -31,7 +31,7 @@ struct TIME_T {
 	uint16_t      year;
 	unsigned long days;
 	unsigned long valid;
-};
+} RtcTime;
 
 struct TimeChangeRule
 {

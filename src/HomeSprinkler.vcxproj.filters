@@ -17,6 +17,7 @@
   <ItemGroup>
     <None Include="HomeSprinkler.ino" />
     <None Include="RtcTime.ino" />
+    <None Include="Wifi.ino" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="__vm\.HomeSprinkler.vsarduino.h">
@@ -26,6 +27,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="RtcTime.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="__vm\.src.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Wifi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
