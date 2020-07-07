@@ -19,6 +19,9 @@ Ticker TickerRtc;
 static const char kMonthNames[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 static const uint8_t kDaysInMonth[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }; // API starts months from 1, this array starts from 0
 
+TimeChangeRule DaylightSavingTime = { TIME_DST }; // Daylight Saving Time
+TimeChangeRule StandardTime = { TIME_STD }; // Standard Time
+
 uint32_t utc_time = 0;
 uint32_t local_time = 0;
 uint32_t daylight_saving_time = 0;
@@ -119,8 +122,7 @@ String GetUptime()
 
 	// "128 14:35:44" - OpenVMS
 	// "128T14:35:44" - Tasmota
-	snprintf_P(dt, sizeof(dt), PSTR("%dT%02d:%02d:%02d"),
-		ut.days, ut.hour, ut.minute, ut.second);
+	snprintf_P(dt, sizeof(dt), PSTR("%dT%02d:%02d:%02d"), ut.days, ut.hour, ut.minute, ut.second);
 	return String(dt);
 }
 

@@ -1,10 +1,8 @@
 #pragma once
 
-#define APP_TIMEZONE           3                    // [Timezone] +1 hour (Amsterdam) (-12 .. 12 = hours from UTC, 99 = use TIME_DST/TIME_STD)
-// -- Time - Up to three NTP servers in your region
-#define NTP_SERVER1            "pool.ntp.org"       // [NtpServer1] Select first NTP server by name or IP address (129.250.35.250)
-#define NTP_SERVER2            "nl.pool.ntp.org"    // [NtpServer2] Select second NTP server by name or IP address (5.39.184.5)
-#define NTP_SERVER3            "0.nl.pool.ntp.org"  // [NtpServer3] Select third NTP server by name or IP address (93.94.224.67)
+/*********************************************************************************************\
+* RtcTime
+\*********************************************************************************************/
 
 // "2017-03-07T11:08:02" - ISO8601:2004
 #define D_YEAR_MONTH_SEPARATOR "-"
@@ -31,7 +29,7 @@ struct TIME_T {
 	uint16_t      year;
 	unsigned long days;
 	unsigned long valid;
-};
+} RtcTime;
 
 struct TimeChangeRule
 {
@@ -43,11 +41,4 @@ struct TimeChangeRule
 	int           offset;                    // offset from UTC in minutes
 };
 
-// -- Time - Start Daylight Saving Time and timezone offset from UTC in minutes
-#define TIME_DST               North, Last, Sun, Mar, 2, +120  // Northern Hemisphere, Last sunday in march at 02:00 +120 minutes
-
-// -- Time - Start Standard Time and timezone offset from UTC in minutes
-#define TIME_STD               North, Last, Sun, Oct, 3, +60   // Northern Hemisphere, Last sunday in october 02:00 +60 minutes
-
-TimeChangeRule DaylightSavingTime = { TIME_DST }; // Daylight Saving Time
-TimeChangeRule StandardTime = { TIME_STD }; // Standard Time
+enum ModStateOptions { MODE_OFF, MODE_IDLE, MODE_ACTIVE, MODE_SPRINKLING };
