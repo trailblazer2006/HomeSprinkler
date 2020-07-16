@@ -250,7 +250,7 @@ void setModeSprinkling()
 {
   timSprinkling = 0;
   modState = MODE_SPRINKLING;
-  analogWrite(PUMP_PIN, HIGH);
+  analogWrite(PUMP_PIN, 1023);
   Blynk.virtualWrite(0, getStateText());
 }
 
