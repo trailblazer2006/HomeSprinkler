@@ -324,6 +324,7 @@ BLYNK_CONNECTED() {
   Blynk.syncVirtual(2, timDuration);
   Blynk.syncVirtual(3, limMoisture);
   Blynk.virtualWrite(4, getTimeLeft());
+  Blynk.syncVirtual(5, timWaiting);
 }
 
 BLYNK_READ(0)
@@ -369,4 +370,16 @@ BLYNK_WRITE(3) {
 BLYNK_READ(4)
 {
   Blynk.virtualWrite(4, getTimeLeft());
+}
+
+BLYNK_READ(5)
+{
+  Blynk.virtualWrite(5, timWaiting);
+}
+
+BLYNK_WRITE(5) {
+  timWaiting = param.asInt();
+  if (timWaiting < 1) {
+    timWaiting = 1;
+  }
 }
